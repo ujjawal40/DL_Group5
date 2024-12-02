@@ -1,6 +1,7 @@
 import os
 import shutil
 
+
 # Path to the main dataset directory
 dataset_dir = '/home/ubuntu/DL-PROJECT/training_data1_v2/'
 
