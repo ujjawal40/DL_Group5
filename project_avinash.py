@@ -129,3 +129,132 @@ for epoch in range(num_epochs):
         running_loss += loss.item()
 
     print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / len(train_loader)}")
+
+
+#%% --------------------------------------- Validation Loop ------------------------------------------------------------
+def validate_model(model, val_loader, criterion):
+    model.eval()
+    val_loss = 0.0
+    with torch.no_grad():
+        for i, (inputs, masks) in enumerate(val_loader):
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+
+            # Reshape masks for compatibility
+            masks = F.interpolate(masks.float(), size=(180, 216, 180), mode="nearest").long()
+            masks = masks.squeeze(1)
+
+            # Compute validation loss
+            loss = criterion(outputs, masks)
+            val_loss += loss.item()
+    return val_loss / len(val_loader)
+
+# Paths to validation data
+val_data = BrainTumorDataset(root_dir='../Data/validation_data1_v2')
+val_loader = DataLoader(val_data, batch_size=1, shuffle=False)
+
+#%% --------------------------------------- Training and Validation Integration ----------------------------------------
+best_val_loss = float('inf')
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    for i, (inputs, masks) in enumerate(train_loader):
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs)
+
+        # Reshape masks
+        masks = F.interpolate(masks.float(), size=(180, 216, 180), mode="nearest").long()
+        masks = masks.squeeze(1)
+
+        loss = criterion(outputs, masks)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    # Validation loss
+    val_loss = validate_model(model, val_loader, criterion)
+
+    print(f"Epoch [{epoch + 1}/{num_epochs}] - Training Loss: {running_loss / len(train_loader)}, Validation Loss: {val_loss}")
+
+    # Save best model
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save(model.state_dict(), "best_model.pth")
+        print("Best model saved!")
+
+#%% --------------------------------------- Model Testing --------------------------------------------------------------
+def test_model(model, test_loader):
+    model.eval()
+    all_outputs = []
+    with torch.no_grad():
+        for inputs, _ in test_loader:
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            all_outputs.append(outputs.cpu())
+    return all_outputs
+
+# Paths to testing data
+test_data = BrainTumorDataset(root_dir='../Data/test_data1_v2')
+test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
+
+# Load best model
+model.load_state_dict(torch.load("best_model.pth"))
+
+# Perform testing
+test_outputs = test_model(model, test_loader)
+print(f"Test completed on {len(test_outputs)} samples.")
+
+#%% --------------------------------------- Dice Coefficient -----------------------------------------------------------
+def dice_coefficient(preds, targets, smooth=1e-6):
+    preds = preds.argmax(dim=1)
+    intersection = (preds * targets).sum()
+    union = preds.sum() + targets.sum()
+    dice = (2.0 * intersection + smooth) / (union + smooth)
+    return dice.item()
+
+# Evaluate Dice score on validation set
+dice_scores = []
+model.eval()
+with torch.no_grad():
+    for inputs, masks in val_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs)
+        masks = F.interpolate(masks.float(), size=(180, 216, 180), mode="nearest").long()
+        dice = dice_coefficient(outputs, masks)
+        dice_scores.append(dice)
+
+avg_dice_score = sum(dice_scores) / len(dice_scores)
+print(f"Average Dice Coefficient on Validation Set: {avg_dice_score}")
+
+#%% --------------------------------------- Visualization --------------------------------------------------------------
+import matplotlib.pyplot as plt
+
+def visualize_sample(input_tensor, mask_tensor, pred_tensor):
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Display one slice from each tensor
+    slice_idx = input_tensor.shape[-1] // 2
+
+    ax[0].imshow(input_tensor[0, :, :, slice_idx], cmap='gray')
+    ax[0].set_title('Input Slice')
+
+    ax[1].imshow(mask_tensor[0, :, :, slice_idx], cmap='jet')
+    ax[1].set_title('Ground Truth')
+
+    ax[2].imshow(pred_tensor[0, :, :, slice_idx], cmap='jet')
+    ax[2].set_title('Prediction')
+
+    plt.show()
+
+# Visualize a random sample from validation set
+model.eval()
+with torch.no_grad():
+    for inputs, masks in val_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs)
+        outputs = outputs.argmax(dim=1, keepdim=True)
+        visualize_sample(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0])
+        break
+
