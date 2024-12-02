@@ -258,3 +258,7 @@ with torch.no_grad():
         visualize_sample(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0])
         break
 
+
+print("For checking purposes")
+print("For checking purposes")
+
