@@ -396,3 +396,6 @@ with torch.no_grad():
         outputs = outputs.argmax(dim=1, keepdim=True)
         visualize_multiple_slices(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0], num_slices=5)
         break
+
+
+print("Fact check")

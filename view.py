@@ -14,6 +14,8 @@ ax[-1].axis('off')
 plt.tight_layout()
 plt.show()
 
+print("Configre check")
 
 
+print("Fact check")
 # BraTS-GLI-02194-104
