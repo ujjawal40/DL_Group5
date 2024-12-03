@@ -101,13 +101,5 @@ if __name__ == '__main__':
                           reference='',
                           dataset_release='')
 
+print("This is a final change check")
 
-    print("For checking purposes")
-
-    print("For checking purposes")
-
-    print("Avinash")
-
-    print("Avinash")
-
-print("This is a change done online")
