@@ -398,4 +398,154 @@ with torch.no_grad():
         break
 
 
-print("Fact check")
+#%% --------------------------------------- Post-Training Analysis: Model Evaluation -----------------------------------
+import seaborn as sns
+
+def calculate_class_distribution(dataset_loader):
+    class_counts = torch.zeros(2)  # Assuming 2 classes: 0 (background), 1 (tumor)
+    for _, masks in dataset_loader:
+        masks = masks.flatten()
+        for cls in range(2):
+            class_counts[cls] += torch.sum(masks == cls)
+    return class_counts / torch.sum(class_counts)
+
+# Calculate class distributions in training, validation, and testing sets
+train_class_dist = calculate_class_distribution(train_loader)
+val_class_dist = calculate_class_distribution(val_loader)
+test_class_dist = calculate_class_distribution(test_loader)
+
+print(f"Class distribution (Training): {train_class_dist}")
+print(f"Class distribution (Validation): {val_class_dist}")
+print(f"Class distribution (Testing): {test_class_dist}")
+
+# Plot class distributions
+def plot_class_distribution(distributions, labels, title):
+    sns.barplot(x=labels, y=distributions)
+    plt.title(title)
+    plt.xlabel("Class")
+    plt.ylabel("Proportion")
+    plt.show()
+
+plot_class_distribution(train_class_dist.numpy(), ["Background", "Tumor"], "Training Set Class Distribution")
+plot_class_distribution(val_class_dist.numpy(), ["Background", "Tumor"], "Validation Set Class Distribution")
+plot_class_distribution(test_class_dist.numpy(), ["Background", "Tumor"], "Testing Set Class Distribution")
+
+#%% --------------------------------------- Per-Class Dice Score -------------------------------------------------------
+def calculate_per_class_dice(model, dataset_loader):
+    model.eval()
+    dice_scores = torch.zeros(2)  # Assuming 2 classes
+    with torch.no_grad():
+        for inputs, masks in dataset_loader:
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+            outputs = outputs.argmax(dim=1)
+            for cls in range(2):
+                preds = (outputs == cls).float()
+                targets = (masks == cls).float()
+                intersection = (preds * targets).sum()
+                union = preds.sum() + targets.sum()
+                dice = (2.0 * intersection) / (union + 1e-6)
+                dice_scores[cls] += dice
+    return dice_scores / len(dataset_loader)
+
+train_dice_scores = calculate_per_class_dice(model, train_loader)
+val_dice_scores = calculate_per_class_dice(model, val_loader)
+test_dice_scores = calculate_per_class_dice(model, test_loader)
+
+print(f"Per-Class Dice Scores (Training): {train_dice_scores}")
+print(f"Per-Class Dice Scores (Validation): {val_dice_scores}")
+print(f"Per-Class Dice Scores (Testing): {test_dice_scores}")
+
+#%% --------------------------------------- Confusion Matrix -----------------------------------------------------------
+from sklearn.metrics import confusion_matrix
+import pandas as pd
+
+def generate_confusion_matrix(model, dataset_loader):
+    all_preds = []
+    all_targets = []
+    model.eval()
+    with torch.no_grad():
+        for inputs, masks in dataset_loader:
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+            preds = outputs.argmax(dim=1).flatten().cpu().numpy()
+            targets = masks.flatten().cpu().numpy()
+            all_preds.extend(preds)
+            all_targets.extend(targets)
+    return confusion_matrix(all_targets, all_preds)
+
+conf_matrix = generate_confusion_matrix(model, val_loader)
+conf_df = pd.DataFrame(conf_matrix, index=["Background", "Tumor"], columns=["Background", "Tumor"])
+sns.heatmap(conf_df, annot=True, fmt="d", cmap="Blues")
+plt.title("Confusion Matrix (Validation Set)")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+#%% --------------------------------------- Precision, Recall, F1-Score ------------------------------------------------
+from sklearn.metrics import classification_report
+
+def generate_classification_report(model, dataset_loader):
+    all_preds = []
+    all_targets = []
+    model.eval()
+    with torch.no_grad():
+        for inputs, masks in dataset_loader:
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+            preds = outputs.argmax(dim=1).flatten().cpu().numpy()
+            targets = masks.flatten().cpu().numpy()
+            all_preds.extend(preds)
+            all_targets.extend(targets)
+    return classification_report(all_targets, all_preds, target_names=["Background", "Tumor"])
+
+val_class_report = generate_classification_report(model, val_loader)
+print("Validation Classification Report:")
+print(val_class_report)
+
+#%% --------------------------------------- Feature Importance ---------------------------------------------------------
+def visualize_feature_importance(modality_importance, modality_names):
+    plt.bar(modality_names, modality_importance)
+    plt.title("Feature Importance Across Modalities")
+    plt.ylabel("Importance Score")
+    plt.show()
+
+# Example modality importance analysis (Dummy example)
+modality_importance = [0.8, 0.9, 0.7, 0.6]
+modality_names = ["T1", "T1CE", "T2", "FLAIR"]
+visualize_feature_importance(modality_importance, modality_names)
+
+#%% --------------------------------------- Segmentation Boundary Analysis ---------------------------------------------
+def boundary_analysis(preds, targets):
+    edges_pred = np.gradient(preds.numpy())
+    edges_target = np.gradient(targets.numpy())
+    boundary_diff = np.sum(np.abs(edges_pred - edges_target))
+    return boundary_diff
+
+boundary_differences = []
+model.eval()
+with torch.no_grad():
+    for inputs, masks in val_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs).argmax(dim=1).cpu()
+        boundary_diff = boundary_analysis(outputs, masks.cpu())
+        boundary_differences.append(boundary_diff)
+
+avg_boundary_diff = sum(boundary_differences) / len(boundary_differences)
+print(f"Average Boundary Difference: {avg_boundary_diff}")
+
+#%% --------------------------------------- Save Analysis Results ------------------------------------------------------
+analysis_results = {
+    "Training Class Distribution": train_class_dist.numpy().tolist(),
+    "Validation Class Distribution": val_class_dist.numpy().tolist(),
+    "Testing Class Distribution": test_class_dist.numpy().tolist(),
+    "Per-Class Dice Scores (Training)": train_dice_scores.tolist(),
+    "Per-Class Dice Scores (Validation)": val_dice_scores.tolist(),
+    "Per-Class Dice Scores (Testing)": test_dice_scores.tolist(),
+    "Average Boundary Difference": avg_boundary_diff
+}
+
+with open("post_training_analysis.json", "w") as f:
+    json.dump(analysis_results, f)
+
+print("Post-training analysis results saved!")
