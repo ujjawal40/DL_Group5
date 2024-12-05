@@ -88,6 +88,7 @@ class BraTSDataset(Dataset):
             image = apply_transformations(image)
             image = resize_image(image, self.target_size)
             image_np = sitk.GetArrayFromImage(image)
+            print(image_np.shape)
             normalized_image = normalize_image(image_np)
             images.append(normalized_image)
 
@@ -114,6 +115,39 @@ def visualize_batch(images, segmentations):
         axes[i, 1].set_title('Transformed Segmentation Mask')
     plt.show()
 
+
+
+
+
+
+def visualize_tumor_regions(segmentation):
+    """
+    Visualize tumor regions based on the updated label definitions:
+    - Whole Tumor: Labels 1, 2, 3
+    - Enhancing Tumor: Labels 1 and 3
+    - Resection Region: Label 4
+    """
+    # Extract tumor regions
+    whole_tumor = np.isin(segmentation, [1, 2, 3]).astype(int)  # Labels 1, 2, 3
+    tumor_Core = np.isin(segmentation, [1, 3]).astype(int)  # Labels 1, 3
+    enhancing_tumor = (segmentation == 1).astype(int)  # Label 4
+
+    # Visualize
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    axes[0].imshow(segmentation[:, :, segmentation.shape[2] // 2], cmap='gray')
+    axes[0].set_title('Original Segmentation')
+
+    axes[1].imshow(whole_tumor[:, :, whole_tumor.shape[2] // 2], cmap='Reds')
+    axes[1].set_title('Whole Tumor (Labels 1, 2, 3)')
+
+    axes[2].imshow(enhancing_tumor[:, :, enhancing_tumor.shape[2] // 2], cmap='Blues')
+    axes[2].set_title('Enhancing Tumor (Labels 1)')
+
+    axes[3].imshow(tumor_Core[:, :, tumor_Core.shape[2] // 2], cmap='Purples')
+    axes[3].set_title('tumor_Core (Label 1,3)')
+
+    plt.show()
+
 img_dir = '/home/ubuntu/Dataset/combined_data/train_images'
 mask_dir = '/home/ubuntu/Dataset/combined_data/masks'
 
@@ -123,3 +157,8 @@ data_loader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0, col
 for images, segmentations in data_loader:
     visualize_batch(images, segmentations)
     break  # Comment out or remove this line to visualize more batches
+
+for _, segmentations in data_loader:
+    for i in range(segmentations.shape[0]):  # Iterate over batch
+        visualize_tumor_regions(segmentations[i].numpy())
+    break
