@@ -549,3 +549,159 @@ with open("post_training_analysis.json", "w") as f:
     json.dump(analysis_results, f)
 
 print("Post-training analysis results saved!")
+
+
+#%% --------------------------------------- ROC and AUC Analysis ------------------------------------------------------
+from sklearn.metrics import roc_curve, auc
+
+def calculate_roc_auc(model, dataset_loader):
+    all_preds = []
+    all_targets = []
+    model.eval()
+    with torch.no_grad():
+        for inputs, masks in dataset_loader:
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+            preds = outputs.softmax(dim=1)[:, 1].flatten().cpu().numpy()
+            targets = (masks.flatten().cpu().numpy() == 1).astype(int)
+            all_preds.extend(preds)
+            all_targets.extend(targets)
+
+    fpr, tpr, _ = roc_curve(all_targets, all_preds)
+    roc_auc = auc(fpr, tpr)
+    return fpr, tpr, roc_auc
+
+fpr, tpr, roc_auc = calculate_roc_auc(model, val_loader)
+print(f"Validation ROC AUC: {roc_auc}")
+
+# Plot ROC Curve
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC Curve (area = {roc_auc:.2f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC)')
+plt.legend(loc="lower right")
+plt.show()
+
+#%% --------------------------------------- Precision-Recall Curve ----------------------------------------------------
+from sklearn.metrics import precision_recall_curve
+
+def calculate_precision_recall(model, dataset_loader):
+    all_preds = []
+    all_targets = []
+    model.eval()
+    with torch.no_grad():
+        for inputs, masks in dataset_loader:
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs)
+            preds = outputs.softmax(dim=1)[:, 1].flatten().cpu().numpy()
+            targets = (masks.flatten().cpu().numpy() == 1).astype(int)
+            all_preds.extend(preds)
+            all_targets.extend(targets)
+
+    precision, recall, _ = precision_recall_curve(all_targets, all_preds)
+    return precision, recall
+
+precision, recall = calculate_precision_recall(model, val_loader)
+
+# Plot Precision-Recall Curve
+plt.figure()
+plt.plot(recall, precision, color='purple', lw=2)
+plt.xlabel('Recall')
+plt.ylabel('Precision')
+plt.title('Precision-Recall Curve')
+plt.show()
+
+#%% --------------------------------------- Detailed Class-Wise Metrics -----------------------------------------------
+from sklearn.metrics import jaccard_score
+
+def calculate_class_metrics(model, dataset_loader):
+    model.eval()
+    jaccard_scores = []
+    for inputs, masks in dataset_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs)
+        preds = outputs.argmax(dim=1).cpu().numpy()
+        targets = masks.cpu().numpy()
+
+        for cls in range(2):  # Assuming two classes
+            cls_jaccard = jaccard_score(targets.flatten() == cls, preds.flatten() == cls)
+            jaccard_scores.append(cls_jaccard)
+
+    return jaccard_scores
+
+class_metrics = calculate_class_metrics(model, val_loader)
+print(f"Class-Wise Jaccard Scores: {class_metrics}")
+
+#%% --------------------------------------- Misclassified Regions Analysis --------------------------------------------
+def analyze_misclassified_regions(preds, targets):
+    error_map = (preds != targets).float()
+    error_percentage = torch.sum(error_map) / torch.numel(targets)
+    return error_map, error_percentage.item()
+
+misclassified_maps = []
+error_percentages = []
+model.eval()
+with torch.no_grad():
+    for inputs, masks in val_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs).argmax(dim=1)
+        error_map, error_percentage = analyze_misclassified_regions(outputs, masks)
+        misclassified_maps.append(error_map.cpu().numpy())
+        error_percentages.append(error_percentage)
+
+avg_error_percentage = sum(error_percentages) / len(error_percentages)
+print(f"Average Misclassification Percentage: {avg_error_percentage:.2f}%")
+
+#%% --------------------------------------- Interactive Visualization -------------------------------------------------
+from ipywidgets import interact
+
+def interactive_visualization(input_tensor, mask_tensor, pred_tensor):
+    @interact(slice_idx=(0, input_tensor.shape[-1] - 1))
+    def plot_slice(slice_idx=0):
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        ax[0].imshow(input_tensor[0, :, :, slice_idx], cmap='gray')
+        ax[0].set_title('Input Slice')
+        ax[1].imshow(mask_tensor[0, :, :, slice_idx], cmap='jet')
+        ax[1].set_title('Ground Truth')
+        ax[2].imshow(pred_tensor[0, :, :, slice_idx], cmap='jet')
+        ax[2].set_title('Prediction')
+        plt.show()
+
+# Use interactive visualization on a sample
+model.eval()
+with torch.no_grad():
+    for inputs, masks in test_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs).argmax(dim=1, keepdim=True)
+        interactive_visualization(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0])
+        break
+
+#%% --------------------------------------- Save Visualizations -------------------------------------------------------
+import os
+
+visualization_dir = "visualizations"
+os.makedirs(visualization_dir, exist_ok=True)
+
+def save_visualizations(input_tensor, mask_tensor, pred_tensor, sample_idx):
+    for i in range(input_tensor.shape[-1]):
+        fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+        ax[0].imshow(input_tensor[0, :, :, i], cmap='gray')
+        ax[0].set_title('Input Slice')
+        ax[1].imshow(mask_tensor[0, :, :, i], cmap='jet')
+        ax[1].set_title('Ground Truth')
+        ax[2].imshow(pred_tensor[0, :, :, i], cmap='jet')
+        ax[2].set_title('Prediction')
+        plt.savefig(os.path.join(visualization_dir, f"sample_{sample_idx}_slice_{i}.png"))
+        plt.close()
+
+# Save visualizations for test samples
+model.eval()
+with torch.no_grad():
+    for idx, (inputs, masks) in enumerate(test_loader):
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs).argmax(dim=1, keepdim=True)
+        save_visualizations(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0], idx)
+        if idx == 4:  # Save visualizations for the first 5 samples
+            break
