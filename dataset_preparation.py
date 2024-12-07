@@ -64,7 +64,7 @@ test_data.to_csv(test_csv_path, index=False)
 print(f"Train data saved to {train_csv_path}")
 print(f"Test data saved to {test_csv_path}")
 
-print("Data splitting completed!. Proceed further")
+print("Data splitting completed!. Proceed further.!")
 
 
 
