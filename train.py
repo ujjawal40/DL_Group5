@@ -9,66 +9,92 @@ from skimage.transform import resize
 import torch.nn.functional as F
 import os
 import time
-
 from tqdm import tqdm
 from torch.cuda.amp import autocast, GradScaler
+
 # Define the device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-def dice_coeff(pred, target, smooth=1e-6):
+def dice_coeff(pred, target, num_classes=4, smooth=1e-6):
     """
-    Compute the Dice coefficient between predicted and target tensors.
-
+    Compute the Dice coefficient for each class separately in a multi-class segmentation task.
     Args:
-        pred: predicted tensor (logits or probabilities, not thresholded)
-        target: ground truth tensor (binary)
+        pred: predicted tensor (logits or probabilities)
+        target: ground truth tensor (long integers representing class labels)
+        num_classes: number of classes (default is 4)
         smooth: small constant to avoid division by zero
-
     Returns:
-        Dice coefficient value
+        A list of Dice coefficients for each class
     """
-    pred = pred.view(-1)
-    target = target.view(-1)
+    # Ensure pred is of float type for softmax
+    pred = pred.float()
 
-    intersection = (pred * target).sum()
-    union = pred.sum() + target.sum()
+    # Apply softmax to convert logits to probabilities
+    pred = torch.softmax(pred, dim=1)  # Convert logits to probabilities
 
-    dice_coeff = (2. * intersection + smooth) / (union + smooth)
-    return dice_coeff
+    dice_scores = []
 
-def dice_loss(pred, target, smooth=1e-6):
+    # Calculate Dice coefficient for each class separately
+    for i in range(num_classes):
+        # Create binary masks for the current class
+        pred_class = (pred.argmax(dim=1) == i).float()  # Predicted class mask (after applying argmax)
+        target_class = (target == i).float()  # Ground truth class mask
+
+        # Flatten both tensors to compute the intersection and union
+        pred_class = pred_class.view(-1)
+        target_class = target_class.view(-1)
+
+        # Calculate the intersection and union for this class
+        intersection = (pred_class * target_class).sum()
+        union = pred_class.sum() + target_class.sum()
+
+        # Compute Dice coefficient for this class
+        dice_score = (2. * intersection + smooth) / (union + smooth)
+        dice_scores.append(dice_score)
+
+    return dice_scores
+
+
+def dice_loss(pred, target, num_classes=4, smooth=1e-6):
     """
-    Compute the Dice loss between predicted and target tensors.
-
+    Compute the Dice loss for multi-class segmentation by calculating Dice for each class separately.
+    The total loss is the mean of Dice loss for each class.
     Args:
-        pred: predicted tensor (logits or probabilities, not thresholded)
-        target: ground truth tensor (binary)
+        pred: predicted tensor (logits or probabilities)
+        target: ground truth tensor (long integers representing class labels)
+        num_classes: number of classes (default is 4)
         smooth: small constant to avoid division by zero
-
     Returns:
-        Dice loss value (1 - Dice coefficient)
+        Mean Dice loss (1 - Dice coefficient for each class)
     """
-    pred = torch.clamp(pred, min=0.0, max=1.0)
-    target = torch.clamp(target, min=0.0, max=1.0)
-    return 1 - dice_coeff(pred, target, smooth)
+    # Ensure pred is of float type for softmax
+    pred = pred.float()
+
+    # Apply softmax to convert logits to probabilities
+    pred = torch.softmax(pred, dim=1)  # Convert logits to probabilities
+
+    # Get the Dice scores for each class
+    dice_scores = dice_coeff(pred, target, num_classes, smooth)
+
+    # Return the mean of the Dice loss (1 - Dice coefficient) for all classes
+    return 1 - torch.mean(torch.tensor(dice_scores))
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels=4):  # 4 output channels for 4 classes
         super(UNet, self).__init__()
 
         # Contracting path (Encoder)
-        self.enc1 = self.conv_block(in_channels, 16)  # Reduced from 32
-        self.enc2 = self.conv_block(16, 32)  # Reduced from 64
-        self.enc3 = self.conv_block(32, 64)  # Reduced from 128
-        self.enc4 = self.conv_block(64, 128)  # Reduced from 256
+        self.enc1 = self.conv_block(in_channels, 16)
+        self.enc2 = self.conv_block(16, 32)
+        self.enc3 = self.conv_block(32, 64)
+        self.enc4 = self.conv_block(64, 128)
 
-        # Bottleneck (adjust to match expected number of channels)
-        self.bottleneck = self.conv_block(128, 256)  # Change 256 to match enc4's output
+        # Bottleneck
+        self.bottleneck = self.conv_block(128, 256)
 
         # Expanding path (Decoder)
-        self.upconv4 = self.upconv_block(256, 128)  # Decoder channels
+        self.upconv4 = self.upconv_block(256, 128)
         self.upconv3 = self.upconv_block(128 + 128, 64)
         self.upconv2 = self.upconv_block(64 + 64, 32)
         self.upconv1 = self.upconv_block(32 + 32, 16)
@@ -76,7 +102,7 @@ class UNet(nn.Module):
         # Final layer to reduce channels before final convolution
         self.reduce_channels = nn.Conv3d(16 + 16, 16, kernel_size=1)
 
-        # Final output layer to ensure output size is the same as input
+        # Final output layer for 4 classes
         self.final_conv = nn.Conv3d(16, out_channels, kernel_size=1)
 
     def conv_block(self, in_channels, out_channels):
@@ -115,7 +141,7 @@ class UNet(nn.Module):
         dec1 = torch.cat((dec1, enc1), dim=1)  # Skip connection
 
         # Reduce channels before final convolution
-        dec1 = self.reduce_channels(dec1)  # Reduce to 16 channels
+        dec1 = self.reduce_channels(dec1)
 
         # Final output layer to match the input size (128x128x128)
         output = self.final_conv(dec1)
@@ -160,16 +186,12 @@ class BraTSDataset(Dataset):
             mask = self.transform(mask)
 
         # Convert to PyTorch tensors and return
-        return torch.tensor(image, dtype=torch.float32).permute(3, 0, 1, 2), torch.tensor(mask,
-                                                                                          dtype=torch.float32).unsqueeze(
-            0)
+        mask = torch.tensor(mask, dtype=torch.long)  # Mask should be of long dtype for multi-class segmentation
+        return torch.tensor(image, dtype=torch.float32).permute(3, 0, 1, 2), mask
 
 
 # Define the model
-model = UNet(in_channels=4, out_channels=1).to(device)  # 4 input channels for the 4 modalities
-
-# # Loss function
-# criterion = nn.BCEWithLogitsLoss()
+model = UNet(in_channels=4, out_channels=4).to(device)  # 4 output channels for 4 classes
 
 # Optimizer
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
@@ -178,7 +200,6 @@ optimizer = optim.Adam(model.parameters(), lr=1e-4)
 image_dir = '/home/ubuntu/DL-PROJECT/training_data1_v2/data/images'
 mask_dir = '/home/ubuntu/DL-PROJECT/training_data1_v2/data/masks'
 train_dataset = BraTSDataset(image_dir, mask_dir)
-# train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4, pin_memory=True)
 
 def check_for_nan(tensor, name="Tensor"):
@@ -188,13 +209,10 @@ def check_for_nan(tensor, name="Tensor"):
     if torch.isinf(tensor).any():
         print(f"Warning: {name} contains Inf values")
 
-
 # Training loop with progress tracking
 num_epochs = 1
 # Initialize the scaler for mixed precision
-# Initialize the scaler for mixed precision
 scaler = GradScaler()
-criterion = nn.BCEWithLogitsLoss()
 
 for epoch in range(num_epochs):
     model.train()
@@ -228,8 +246,8 @@ for epoch in range(num_epochs):
         scaler.step(optimizer)
         scaler.update()
 
-        # Calculate accuracy
-        preds = (outputs > 0.5).float()  # Apply threshold to binarize output
+        # Calculate accuracy (for multi-class, we calculate accuracy for each class)
+        preds = torch.argmax(outputs, dim=1)  # Get class predictions for each voxel
         correct_preds += (preds == labels).sum().item()
         total_preds += labels.numel()
 
@@ -248,3 +266,6 @@ for epoch in range(num_epochs):
     avg_epoch_loss = running_loss / len(train_loader)
 
     print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_epoch_loss:.4f}, Accuracy: {accuracy:.2f}%, Time: {minutes}m {seconds}s")
+
+torch.save(model.state_dict(), 'unet_model.pt')
+print("Model saved as 'unet_model.pt'")
