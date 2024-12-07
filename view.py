@@ -3,8 +3,11 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 from glob import glob
 
-imgs = [nib.load(f"../Data/training_data1_v2/BraTS-GLI-02194-104/BraTS-GLI-02194-104-{m}.nii").get_fdata().astype(np.float32)[:, :, 75] for m in ["t1c", "t1n", "t2f", "t2w"]]
-lbl = nib.load("../Data/training_data1_v2/BraTS-GLI-02194-104/BraTS-GLI-02194-104-seg.nii").get_fdata().astype(np.uint8)[:, :, 75]
+imgs = [nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t1c.nii").get_fdata().astype(np.float32)[:, :, 75],
+        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t1n.nii").get_fdata().astype(np.float32)[:, :, 75],
+        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t2w.nii").get_fdata().astype(np.float32)[:, :, 75],
+        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t2f.nii").get_fdata().astype(np.float32)[:, :, 75],]
+lbl = nib.load("../Data/processed_data/train_masks/BraTS-GLI-00006-101-seg.nii").get_fdata().astype(np.uint8)[:, :, 75]
 fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(15, 15))
 for i, img in enumerate(imgs):
     ax[i].imshow(img, cmap='gray')
@@ -14,8 +17,4 @@ ax[-1].axis('off')
 plt.tight_layout()
 plt.show()
 
-print("Configre check")
-
-
-print("Fact check")
-# BraTS-GLI-02194-104
+print("Task Finished.")
