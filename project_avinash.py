@@ -705,3 +705,179 @@ with torch.no_grad():
         save_visualizations(inputs.cpu().numpy()[0], masks.cpu().numpy(), outputs.cpu().numpy()[0], idx)
         if idx == 4:  # Save visualizations for the first 5 samples
             break
+
+
+
+#%% --------------------------------------- Boundary Distance Analysis ------------------------------------------------
+from scipy.ndimage import distance_transform_edt
+
+def boundary_distance(preds, targets):
+    preds_boundary = distance_transform_edt(1 - preds) == 1
+    targets_boundary = distance_transform_edt(1 - targets) == 1
+    distance = np.abs(preds_boundary - targets_boundary)
+    return distance.sum()
+
+boundary_distances = []
+model.eval()
+with torch.no_grad():
+    for inputs, masks in val_loader:
+        inputs, masks = inputs.to(device), masks.to(device)
+        outputs = model(inputs).argmax(dim=1).cpu().numpy()
+        masks = masks.cpu().numpy()
+        dist = boundary_distance(outputs[0], masks[0])
+        boundary_distances.append(dist)
+
+avg_boundary_distance = sum(boundary_distances) / len(boundary_distances)
+print(f"Average Boundary Distance: {avg_boundary_distance:.2f}")
+
+#%% --------------------------------------- Overlap and Dice Visualization --------------------------------------------
+def plot_dice_vs_overlap(dice_scores, overlap_scores, title="Dice vs Overlap"):
+    plt.scatter(overlap_scores, dice_scores, alpha=0.6)
+    plt.xlabel("Overlap Score")
+    plt.ylabel("Dice Score")
+    plt.title(title)
+    plt.show()
+
+# Dummy data for overlap scores (generate real values from your model analysis)
+overlap_scores = np.random.uniform(0.6, 0.9, len(dice_scores))
+
+# Plot Dice vs Overlap
+plot_dice_vs_overlap(dice_scores=val_dice_scores.tolist(), overlap_scores=overlap_scores)
+
+#%% --------------------------------------- Metrics per Patient --------------------------------------------------------
+def patient_wise_metrics(model, dataset_loader):
+    patient_metrics = []
+    model.eval()
+    with torch.no_grad():
+        for idx, (inputs, masks) in enumerate(dataset_loader):
+            inputs, masks = inputs.to(device), masks.to(device)
+            outputs = model(inputs).argmax(dim=1).cpu().numpy()
+            masks = masks.cpu().numpy()
+
+            dice = dice_coefficient(torch.tensor(outputs), torch.tensor(masks))
+            jaccard = jaccard_score(masks.flatten(), outputs.flatten())
+            patient_metrics.append({"Patient": idx, "Dice": dice, "Jaccard": jaccard})
+    return patient_metrics
+
+metrics_per_patient = patient_wise_metrics(model, val_loader)
+print(metrics_per_patient[:5])  # Display metrics for the first 5 patients
+
+#%% --------------------------------------- Heatmap of Misclassified Regions -------------------------------------------
+def plot_error_heatmap(error_map, title="Error Heatmap"):
+    plt.imshow(error_map[0, :, :, error_map.shape[3] // 2], cmap='hot')
+    plt.title(title)
+    plt.colorbar()
+    plt.show()
+
+# Example heatmap for one patient
+example_error_map = misclassified_maps[0]
+plot_error_heatmap(example_error_map, title="Example Misclassification Heatmap")
+
+#%% --------------------------------------- 3D Visualization of Predictions --------------------------------------------
+import plotly.graph_objects as go
+
+def visualize_3d_segmentation(input_volume, pred_volume, mask_volume):
+    fig = go.Figure()
+
+    # Input Volume (Overlay as a grayscale background)
+    fig.add_trace(go.Volume(
+        x=np.arange(input_volume.shape[1]),
+        y=np.arange(input_volume.shape[2]),
+        z=np.arange(input_volume.shape[3]),
+        value=input_volume[0],
+        isomin=0.1,
+        isomax=0.9,
+        opacity=0.1,  # Adjust for transparency
+        surface_count=15
+    ))
+
+    # Prediction Volume
+    fig.add_trace(go.Volume(
+        x=np.arange(pred_volume.shape[1]),
+        y=np.arange(pred_volume.shape[2]),
+        z=np.arange(pred_volume.shape[3]),
+        value=pred_volume[0],
+        isomin=0.5,
+        isomax=1,
+        opacity=0.3,
+        surface_count=10,
+        colorscale="Viridis"
+    ))
+
+    # Mask Volume
+    fig.add_trace(go.Volume(
+        x=np.arange(mask_volume.shape[1]),
+        y=np.arange(mask_volume.shape[2]),
+        z=np.arange(mask_volume.shape[3]),
+        value=mask_volume[0],
+        isomin=0.5,
+        isomax=1,
+        opacity=0.3,
+        surface_count=10,
+        colorscale="Reds"
+    ))
+
+    fig.update_layout(scene=dict(
+        xaxis_title='X-axis',
+        yaxis_title='Y-axis',
+        zaxis_title='Z-axis'),
+        title="3D Visualization of Segmentation"
+    )
+    fig.show()
+
+# Test 3D Visualization
+model.eval()
+with torch.no_grad():
+    for inputs, masks in test_loader:
+        inputs, masks = inputs.cpu().numpy(), masks.cpu().numpy()
+        outputs = model(inputs.to(device)).argmax(dim=1).cpu().numpy()
+        visualize_3d_segmentation(inputs[0], outputs, masks[0])
+        break
+
+#%% --------------------------------------- Explainability: Grad-CAM --------------------------------------------------
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
+def grad_cam_analysis(model, inputs):
+    target_layers = [model.encoder[-1]]  # Example: last layer of the encoder
+    cam = GradCAM(model=model, target_layers=target_layers, use_cuda=torch.cuda.is_available())
+    grayscale_cam = cam(input_tensor=inputs, targets=None)  # No specific target class for segmentation
+    grayscale_cam = grayscale_cam[0, :]
+    return grayscale_cam
+
+# Apply Grad-CAM on a test sample
+model.eval()
+with torch.no_grad():
+    for inputs, _ in test_loader:
+        inputs = inputs.to(device)
+        cam_result = grad_cam_analysis(model, inputs)
+        plt.imshow(cam_result, cmap='jet')
+        plt.title("Grad-CAM Heatmap")
+        plt.colorbar()
+        plt.show()
+        break
+
+#%% --------------------------------------- Save Metrics and Visualizations -------------------------------------------
+# Save patient-wise metrics
+import pandas as pd
+metrics_df = pd.DataFrame(metrics_per_patient)
+metrics_df.to_csv("patient_metrics.csv", index=False)
+print("Patient-wise metrics saved to patient_metrics.csv!")
+
+# Save visualizations as HTML files
+visualization_dir = "3d_visualizations"
+os.makedirs(visualization_dir, exist_ok=True)
+
+def save_3d_visualization(fig, filename):
+    fig.write_html(os.path.join(visualization_dir, filename))
+
+# Save example 3D visualization
+model.eval()
+with torch.no_grad():
+    for inputs, masks in test_loader:
+        inputs, masks = inputs.cpu().numpy(), masks.cpu().numpy()
+        outputs = model(inputs.to(device)).argmax(dim=1).cpu().numpy()
+        fig = visualize_3d_segmentation(inputs[0], outputs, masks[0])
+        save_3d_visualization(fig, "example_3d_visualization.html")
+        break
