@@ -104,12 +104,23 @@ class BuildDataset(Dataset):
         img = nib.load(t1c_file).get_fdata()
         mask = nib.load(seg_file).get_fdata()
 
+        # Handle 3D masks by taking the middle slice or performing a projection
+        if mask.ndim == 3:  # Check if mask is 3D
+            mask = mask[:, :, mask.shape[2] // 2]  # Select the middle slice
+            # Alternatively, perform a projection:
+            # mask = mask.max(axis=2)
+
         # Resize to match model input size
-        img = cv2.resize(img, (128, 128))
+        img = cv2.resize(img[:, :, 0], (128, 128))  # Take the first slice from the 3rd dimension
         mask = cv2.resize(mask, (128, 128))
 
         # Normalize the image
         img = np.expand_dims(img, axis=-1).astype(np.float32) / 255.0
+
+        img = np.repeat(img, 3, axis=-1)
+
+        # print(f"Image shape before permute: {img.shape}")
+        # print(f"Mask shape before permute: {mask.shape}")
 
         # Convert mask to one-hot encoding (3 classes)
         masks = np.zeros((128, 128, 3))
@@ -169,24 +180,31 @@ def show_img(img, mask=None):
     plt.axis('off')
 
 
-def plot_batch(imgs, msks=None, size=3):
+def plot_batch(imgs, msks=None, size=5):
+    """
+    Plot a batch of images and masks side by side for visualization.
+    """
     # Ensure size does not exceed batch size
     size = min(size, len(imgs))
 
-    plt.figure(figsize=(5 * size, 5))
+    # Set up the figure
+    plt.figure(figsize=(size * 5, 10))
     for idx in range(size):
-        # Plot image
+        # Plot the image
         plt.subplot(2, size, idx + 1)
         img = imgs[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
-        plt.imshow(img, cmap="bone")
+        img = (img - img.min()) / (img.max() - img.min())  # Normalize to [0, 1] range
+        img = img.squeeze()  # Remove the channel dimension for grayscale
+        plt.imshow(img, cmap="gray")  # Use gray colormap for better visualization
         plt.axis("off")
         plt.title("Image")
 
-        # Plot mask if provided
+        # Plot the mask if available
         if msks is not None:
             plt.subplot(2, size, idx + 1 + size)
             mask = msks[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
-            plt.imshow(mask, cmap="viridis", alpha=0.5)
+            mask_combined = mask.sum(axis=-1)  # Combine classes for better visualization
+            plt.imshow(mask_combined, cmap="viridis", alpha=0.8)
             plt.axis("off")
             plt.title("Mask")
 
@@ -434,8 +452,9 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
             batch_size = images.size(0)
 
             with amp.autocast(enabled=True):
-                y_pred = model(images)
-                target_masks_resized = F.interpolate(masks, size=(112, 112), mode='bilinear', align_corners=False)
+                y_pred = model(images)  # Model's output
+                # Resize the target to match y_pred's dimensions
+                target_masks_resized = F.interpolate(masks, size=y_pred.shape[2:], mode='bilinear', align_corners=False)
                 loss = criterion(y_pred, target_masks_resized)
                 loss = loss / n_accumulate
 
@@ -536,40 +555,39 @@ def valid_one_epoch(model, dataloader, device, epoch=1):
     running_loss = 0.0
 
     val_scores = []
-    with torch.no_grad():
-        with tqdm(enumerate(dataloader), total=len(dataloader), desc="Epoch {}".format(epoch)) as pbar:
-            for step, (images, masks) in pbar:
-                images = images.to(device, dtype=torch.float)
-                masks = masks.to(device, dtype=torch.float)
+    with tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch}") as pbar:
+        for step, (images, masks) in pbar:
+            images = images.to(device, dtype=torch.float)
+            masks = masks.to(device, dtype=torch.float)
 
-                batch_size = images.size(0)
+            batch_size = images.size(0)
 
-                y_pred = model(images)
-                target_masks_resized = F.interpolate(masks, size=(112, 112), mode='bilinear', align_corners=False)
-                loss = criterion(y_pred, target_masks_resized)
+            y_pred = model(images)  # Forward pass
+            # Resize masks to match y_pred dimensions
+            target_masks_resized = F.interpolate(masks, size=y_pred.shape[2:], mode='bilinear', align_corners=False)
+            loss = criterion(y_pred, target_masks_resized)  # Compute loss
 
-                running_loss += (loss.item() * batch_size)
-                dataset_size += batch_size
+            running_loss += (loss.item() * batch_size)
+            dataset_size += batch_size
 
-                epoch_loss = running_loss / dataset_size
+            epoch_loss = running_loss / dataset_size
 
-                y_pred = nn.Sigmoid()(y_pred)
-                #test_metrics = metrics_func(list_of_metrics, list_of_agg, real_labels[1:], pred_labels)
-                target_masks_resized = F.interpolate(masks, size=(112, 112), mode='bilinear', align_corners=False)
-                val_dice = dice_coef(target_masks_resized, y_pred).cpu().detach().numpy()
-                val_jaccard = iou_coef(target_masks_resized, y_pred).cpu().detach().numpy()
-                val_scores.append([val_dice, val_jaccard])
+            # Calculate metrics
+            y_pred = nn.Sigmoid()(y_pred)  # Apply sigmoid for probabilities
+            val_dice = dice_coef(target_masks_resized, y_pred).cpu().detach().numpy()
+            val_jaccard = iou_coef(target_masks_resized, y_pred).cpu().detach().numpy()
+            val_scores.append([val_dice, val_jaccard])
 
-                mem = torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0
-                current_lr = optimizer.param_groups[0]['lr']
-                pbar.set_postfix(valid_loss=f'{epoch_loss:0.4f}',
-                                 lr=f'{current_lr:0.5f}',
-                                 gpu_memory=f'{mem:0.2f} GB')
-    val_scores = np.mean(val_scores, axis=0)
+            mem = torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0
+            current_lr = optimizer.param_groups[0]['lr']
+            pbar.set_postfix(valid_loss=f'{epoch_loss:.4f}', lr=f'{current_lr:.5f}', gpu_mem=f'{mem:.2f} GB')
+
+    val_scores = np.mean(val_scores, axis=0)  # Average metrics across batches
     torch.cuda.empty_cache()
     gc.collect()
 
     return epoch_loss, val_scores
+
 
 def save_model(model):
     # Open the file
