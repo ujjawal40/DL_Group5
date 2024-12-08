@@ -95,14 +95,7 @@ print(f"Validation directories: {len(validation_directories)}")
 
 
 def process_and_save(data_directories, image_dir, mask_dir):
-    """
-    Processes and saves NIfTI images and masks into the specified directories.
 
-    Parameters:
-    - data_directories: List of patient directories to process.
-    - image_dir: Directory to save image files.
-    - mask_dir: Directory to save mask files.
-    """
     for patient_dir in data_directories:
         patient_path = os.path.join(data_dir, patient_dir)
 
@@ -137,37 +130,64 @@ process_and_save(validation_directories, val_img_dir, val_mask_dir)
 
 print("Dataset has been split and organized into train and validation directories.")
 
+def read_data():
+    train_image_dir = '/home/ubuntu/DL_Group5/split_data/train/images/'
+    train_mask_dir = '/home/ubuntu/DL_Group5/split_data/train/masks/'
+    val_image_dir = '/home/ubuntu/DL_Group5/split_data/val/images/'
+    val_mask_dir = '/home/ubuntu/DL_Group5/split_data/val/masks/'
+
+    train_dataset = BuildDataset(train_image_dir, train_mask_dir, subset="train")
+    val_dataset = BuildDataset(val_image_dir, val_mask_dir, subset="val")
+
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=8, shuffle=False, num_workers=4)
+
+    return train_loader, val_loader
+
 
 # Dataset
 class BuildDataset(torch.utils.data.Dataset):
-    def __init__(self, df, subset="train", transforms=None):
-        self.df = df
-        self.subset = subset
+    def __init__(self, image_dir, mask_dir=None, transforms=None, subset="train"):
+
+        self.image_dir = image_dir
+        self.mask_dir = mask_dir
+        self.image_files = sorted(os.listdir(image_dir))
+        self.mask_files = sorted(os.listdir(mask_dir)) if mask_dir else None
         self.transforms = transforms
+        self.subset = subset
 
     def __len__(self):
-        return len(self.df)
+        return len(self.image_files)
 
     def __getitem__(self, index):
-        masks = np.zeros((img_size[0], img_size[1], 3), dtype=np.float32)
-        img_path = self.df['path'].iloc[index]
-        w = self.df['width'].iloc[index]
-        h = self.df['height'].iloc[index]
-        img = self.__load_img(img_path)
-        if self.subset == 'train':
-            for k, j in zip([0, 1, 2], ["large_bowel", "small_bowel", "stomach"]):
-                rles = self.df[j].iloc[index]
-                mask = rle_decode(rles, shape=(h, w, 1))
-                mask = cv2.resize(mask, img_size)
-                masks[:, :, k] = mask
+        # Load the image
+        img_path = os.path.join(self.image_dir, self.image_files[index])
+        img = nib.load(img_path).get_fdata()
+        img = cv2.resize(img, (128, 128))  # Resize to match your model's input
+        img = np.expand_dims(img, axis=-1)  # Add channel dimension for grayscale
+        img = img.astype(np.float32) / 255.0  # Normalize
 
-        masks = masks.transpose(2, 0, 1)
-        img = img.transpose(2, 0, 1)
+        if self.subset == "train":
+            # Load the mask
+            mask_path = os.path.join(self.mask_dir, self.mask_files[index])
+            mask = nib.load(mask_path).get_fdata()
+            mask = cv2.resize(mask, (128, 128))  # Resize to match your model's input
+            mask = mask.astype(np.float32)
 
-        if self.subset == 'train':
-            return torch.tensor(img), torch.tensor(masks)
+            # Convert masks to one-hot encoding if necessary
+            masks = np.zeros((128, 128, 3))  # 3 classes
+            for i in range(3):
+                masks[:, :, i] = (mask == i).astype(np.float32)
+
+            # Apply transformations (if any)
+            if self.transforms:
+                augmented = self.transforms(image=img, mask=masks)
+                img = augmented["image"]
+                masks = augmented["mask"]
+
+            return torch.tensor(img).permute(2, 0, 1), torch.tensor(masks).permute(2, 0, 1)
         else:
-            return torch.tensor(img)
+            return torch.tensor(img).permute(2, 0, 1)
 
     def __load_gray_img(self, img_path):
         img = cv2.imread(img_path, cv2.IMREAD_ANYDEPTH)
@@ -196,15 +216,32 @@ def show_img(img, mask=None):
         labels = ["Large Bowel", "Small Bowel", "Stomach"]
         plt.legend(handles, labels)
     plt.axis('off')
-def plot_batch(imgs, msks, size=3):
-    plt.figure(figsize=(5*5, 5))
+
+def plot_batch(imgs, msks=None, size=3):
+
+    # Ensure size does not exceed batch size
+    size = min(size, len(imgs))
+
+    plt.figure(figsize=(5 * size, 5))
     for idx in range(size):
-        plt.subplot(1, 5, idx+1)
-        img = imgs[idx,].permute((1, 2, 0)).numpy()
-        msk = msks[idx,].permute((1, 2, 0)).numpy()
-        show_img(img, msk)
+        # Plot image
+        plt.subplot(2, size, idx + 1)
+        img = imgs[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
+        plt.imshow(img, cmap="bone")
+        plt.axis("off")
+        plt.title("Image")
+
+        # Plot mask if provided
+        if msks is not None:
+            plt.subplot(2, size, idx + 1 + size)
+            mask = msks[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
+            plt.imshow(mask, cmap="viridis", alpha=0.5)
+            plt.axis("off")
+            plt.title("Mask")
+
     plt.tight_layout()
     plt.show()
+
 
 
 # Model Architecture
@@ -591,11 +628,24 @@ def save_model(model):
 
 
 if __name__ == '__main__':
+    # Define the model, optimizer, criterion, and scheduler
     model, optimizer, criterion, scheduler = model_definition()
 
-    imgs, msks, train_loader, valid_loader = read_data()
+    # Read the data (train and validation loaders)
+    train_loader, val_loader = read_data()
+
+    # Define metrics and aggregation methods (if used elsewhere)
     list_of_metrics = ['f1_micro', 'f1_macro', 'hlm']
     list_of_agg = ['avg']
-    model, history= run_training(model, optimizer, scheduler, device, n_epochs, train_loader, valid_loader)
 
-    plot_batch(imgs, msks, size=5)
+    # Train the model
+    model, history = run_training(model, optimizer, scheduler, device, n_epochs, train_loader, val_loader)
+
+    # Visualize a batch of training data
+    for imgs, msks in train_loader:
+        plot_batch(imgs, msks, size=5)
+        break  # Only display the first batch
+
+    # Save processed train and validation data
+    process_and_save(train_directories, train_img_dir, train_mask_dir)
+    process_and_save(validation_directories, val_img_dir, val_mask_dir)
