@@ -390,7 +390,7 @@ model = model.to(device)
 criterion = torch.nn.CrossEntropyLoss()  # You might adjust this depending on your specific task
 optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
 
-train_model(model, data_loader, val_loader, criterion, optimizer, num_epochs=10, save_directory=sav_dir,num_classes=5)
+train_model(model, data_loader, val_loader, criterion, optimizer, num_epochs=5, save_directory=sav_dir,num_classes=5)
 
 
 
