@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchvision import models
 import nibabel as nib
 
-c_  = Fore.GREEN
+c_ = Fore.GREEN
 sr_ = Style.RESET_ALL
 import torch
 from tqdm import tqdm
@@ -13,6 +13,7 @@ tqdm.pandas()
 import copy
 from collections import defaultdict
 import gc
+
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 # PyTorch
@@ -22,7 +23,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.cuda import amp
 
 from glob import glob
-
 import cv2
 import pandas as pd
 import numpy as np
@@ -49,6 +49,7 @@ num_classes = 3
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 DIR = os.getcwd() + '/data/'
 
+
 def set_seed(seed=42):
     np.random.seed(seed)
     random.seed(seed)
@@ -63,65 +64,66 @@ def set_seed(seed=42):
 
 
 # Directories
-    data_dir = '/home/ubuntu/DL_Group5/training_data1_v2'
+data_dir = '/home/ubuntu/DL_Group5/training_data1_v2'
 
-    # Read and shuffle subdirectories
-    sub_directories = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
-    random.shuffle(sub_directories)
+# Read and shuffle subdirectories
+sub_directories = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+random.shuffle(sub_directories)
 
-    # Split into train (80%) and validation (20%)
-    num_train = int(0.8 * len(sub_directories))
-    train_directories = sub_directories[:num_train]
-    validation_directories = sub_directories[num_train:]
+# Split into train (80%) and validation (20%)
+num_train = int(0.8 * len(sub_directories))
+train_directories = sub_directories[:num_train]
+validation_directories = sub_directories[num_train:]
 
-    print(f"Total directories: {len(sub_directories)}")
-    print(f"Training directories: {len(train_directories)}")
-    print(f"Validation directories: {len(validation_directories)}")
+print(f"Total directories: {len(sub_directories)}")
+print(f"Training directories: {len(train_directories)}")
+print(f"Validation directories: {len(validation_directories)}")
 
-    # Dataset
+
+# Dataset
 class BuildDataset(Dataset):
-        def __init__(self, directories, data_dir, subset="train", transforms=None):
+    def __init__(self, directories, data_dir, subset="train", transforms=None):
+        self.directories = directories
+        self.data_dir = data_dir
+        self.subset = subset
+        self.transforms = transforms
 
-            self.directories = directories
-            self.data_dir = data_dir
-            self.subset = subset
-            self.transforms = transforms
+    def __len__(self):
+        return len(self.directories)
 
-        def __len__(self):
-            return len(self.directories)
+    def __getitem__(self, index):
+        # Get the directory for this sample
+        patient_dir = self.directories[index]
+        patient_path = os.path.join(self.data_dir, patient_dir)
 
-        def __getitem__(self, index):
-            # Get the directory for this sample
-            patient_dir = self.directories[index]
-            patient_path = os.path.join(self.data_dir, patient_dir)
+        # Define file paths
+        t1c_file = os.path.join(patient_path, f"{patient_dir}-t1c.nii.gz")
+        seg_file = os.path.join(patient_path, f"{patient_dir}-seg.nii.gz")
 
-            # Define file paths
-            t1c_file = os.path.join(patient_path, f"{patient_dir}-t1c.nii.gz")
-            seg_file = os.path.join(patient_path, f"{patient_dir}-seg.nii.gz")
+        # Load the image and mask
+        img = nib.load(t1c_file).get_fdata()
+        mask = nib.load(seg_file).get_fdata()
 
-            # Load the image and mask
-            img = nib.load(t1c_file).get_fdata()
-            mask = nib.load(seg_file).get_fdata()
+        # Resize to match model input size
+        img = cv2.resize(img, (128, 128))
+        mask = cv2.resize(mask, (128, 128))
 
-            # Resize to match model input size
-            img = cv2.resize(img, (128, 128))
-            mask = cv2.resize(mask, (128, 128))
+        # Normalize the image
+        img = np.expand_dims(img, axis=-1).astype(np.float32) / 255.0
 
-            # Normalize the image
-            img = np.expand_dims(img, axis=-1).astype(np.float32) / 255.0
+        # Convert mask to one-hot encoding (3 classes)
+        masks = np.zeros((128, 128, 3))
+        for i in range(3):
+            masks[:, :, i] = (mask == i).astype(np.float32)
 
-            # Convert mask to one-hot encoding (3 classes)
-            masks = np.zeros((128, 128, 3))
-            for i in range(3):
-                masks[:, :, i] = (mask == i).astype(np.float32)
+        # Apply transformations (if any)
+        if self.transforms:
+            augmented = self.transforms(image=img, mask=masks)
+            img = augmented["image"]
+            masks = augmented["mask"]
 
-            # Apply transformations (if any)
-            if self.transforms:
-                augmented = self.transforms(image=img, mask=masks)
-                img = augmented["image"]
-                masks = augmented["mask"]
+        return torch.tensor(img).permute(2, 0, 1), torch.tensor(masks).permute(2, 0, 1)
 
-            return torch.tensor(img).permute(2, 0, 1), torch.tensor(masks).permute(2, 0, 1)
 
 def read_data():
     """
@@ -135,21 +137,24 @@ def read_data():
 
     return train_loader, val_loader
 
+
 def __load_gray_img(self, img_path):
-        img = cv2.imread(img_path, cv2.IMREAD_ANYDEPTH)
-        img = (img - img.min()) / (img.max() - img.min()) * 255.0
-        img = cv2.resize(img, img_size)
-        img = np.expand_dims(img, axis=-1)
-        img = img.astype(np.float32) / 255.
-        return img
+    img = cv2.imread(img_path, cv2.IMREAD_ANYDEPTH)
+    img = (img - img.min()) / (img.max() - img.min()) * 255.0
+    img = cv2.resize(img, img_size)
+    img = np.expand_dims(img, axis=-1)
+    img = img.astype(np.float32) / 255.0
+    return img
+
 
 def __load_img(self, img_path):
-        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
-        img = (img - img.min()) / (img.max() - img.min()) * 255.0
-        img = cv2.resize(img, img_size)
-        img = np.tile(img[..., None], [1, 1, 3])  # gray to rgb
-        img = img.astype(np.float32) / 255.
-        return img
+    img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
+    img = (img - img.min()) / (img.max() - img.min()) * 255.0
+    img = cv2.resize(img, img_size)
+    img = np.tile(img[..., None], [1, 1, 3])  # gray to rgb
+    img = img.astype(np.float32) / 255.0
+    return img
+
 
 def show_img(img, mask=None):
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -163,8 +168,8 @@ def show_img(img, mask=None):
         plt.legend(handles, labels)
     plt.axis('off')
 
-def plot_batch(imgs, msks=None, size=3):
 
+def plot_batch(imgs, msks=None, size=3):
     # Ensure size does not exceed batch size
     size = min(size, len(imgs))
 
@@ -573,15 +578,14 @@ def save_model(model):
 
 
 if __name__ == '__main__':
+    # Set seed for reproducibility
+    set_seed(seed)
+
     # Define the model, optimizer, criterion, and scheduler
     model, optimizer, criterion, scheduler = model_definition()
 
     # Read the data (train and validation loaders)
     train_loader, val_loader = read_data()
-
-    # Define metrics and aggregation methods (if used elsewhere)
-    list_of_metrics = ['f1_micro', 'f1_macro', 'hlm']
-    list_of_agg = ['avg']
 
     # Train the model
     model, history = run_training(model, optimizer, scheduler, device, n_epochs, train_loader, val_loader)
@@ -589,8 +593,4 @@ if __name__ == '__main__':
     # Visualize a batch of training data
     for imgs, msks in train_loader:
         plot_batch(imgs, msks, size=5)
-        break  # Only display the first batch
-
-    # Save processed train and validation data
-    process_and_save(train_directories, train_img_dir, train_mask_dir)
-    process_and_save(validation_directories, val_img_dir, val_mask_dir)
+        break
