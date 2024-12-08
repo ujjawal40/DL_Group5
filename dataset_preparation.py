@@ -6,8 +6,8 @@ from sklearn.model_selection import train_test_split
 
 # Define the paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
-base_dir = os.path.join(script_dir, '..', 'Data')
-training_dir = os.path.join(base_dir, 'training_data1_v2')
+training_dir = os.path.join(script_dir, '..', 'nData')
+# training_dir = os.path.join(base_dir, 'training_data1_v2')
 
 # Supported modalities
 modalities = ['t1c', 't1n', 't2f', 't2w', 'seg']

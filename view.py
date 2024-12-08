@@ -1,20 +1,39 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import nibabel as nib
-from glob import glob
 
-imgs = [nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t1c.nii").get_fdata().astype(np.float32)[:, :, 75],
-        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t1n.nii").get_fdata().astype(np.float32)[:, :, 75],
-        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t2w.nii").get_fdata().astype(np.float32)[:, :, 75],
-        nib.load(f"../Data/processed_data/train_images/BraTS-GLI-00006-101_t2f.nii").get_fdata().astype(np.float32)[:, :, 75],]
-lbl = nib.load("../Data/processed_data/train_masks/BraTS-GLI-00006-101-seg.nii").get_fdata().astype(np.uint8)[:, :, 75]
-fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(15, 15))
+# Paths
+# script_dir = os.path.dirname(os.path.abspath(__file__))
+# base_dir = os.path.join(script_dir, '../Data')
+# train_images_dir = os.path.join(base_dir, 'training_data1_v2/train_images')
+# train_masks_dir = os.path.join(base_dir, 'training_data1_v2/train_masks')
+
+script_dir = os.path.dirname(os.path.abspath(__file__))  # Path to the Code folder
+dl_group5_dir = os.path.dirname(script_dir)  # Path to DL_Group5 folder
+base_data_dir = os.path.join(dl_group5_dir, 'Data')  # Correct path to Data folder
+data_dir = os.path.join(base_data_dir, 'training_data1_v2')  # Path to training_data1_v2
+train_images_dir = os.path.join(data_dir, 'train_images')
+train_masks_dir = os.path.join(data_dir, 'train_masks')
+
+# Load images
+imgs = [
+    nib.load(os.path.join(train_images_dir, "BraTS-GLI-02665-100_t1c.nii")).get_fdata().astype(np.float32)[:, :, 75],
+    nib.load(os.path.join(train_images_dir, "BraTS-GLI-02665-100_t1n.nii")).get_fdata().astype(np.float32)[:, :, 75],
+    nib.load(os.path.join(train_images_dir, "BraTS-GLI-02665-100_t2w.nii")).get_fdata().astype(np.float32)[:, :, 75],
+    nib.load(os.path.join(train_images_dir, "BraTS-GLI-02665-100_t2f.nii")).get_fdata().astype(np.float32)[:, :, 75],
+]
+lbl = nib.load(os.path.join(train_masks_dir, "BraTS-GLI-02665-100_seg.nii")).get_fdata().astype(np.uint8)[:, :, 75]
+
+# Plot images
+fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(20, 10))
 for i, img in enumerate(imgs):
     ax[i].imshow(img, cmap='gray')
     ax[i].axis('off')
-ax[-1].imshow(lbl, vmin=0, vmax=4)
+ax[-1].imshow(lbl, cmap='nipy_spectral', vmin=0, vmax=4)
 ax[-1].axis('off')
 plt.tight_layout()
 plt.show()
 
 print("Task Finished.")
+
