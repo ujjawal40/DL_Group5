@@ -102,5 +102,5 @@ def val_data():
     print("Validation Files have been organized and extracted into images and masks directories.")
 
 
-brats_2024()
+# brats_2024()
 val_data()
