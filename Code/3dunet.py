@@ -388,7 +388,7 @@ sav_dir='/home/ubuntu/DL_Group5/models'
 model = UNet3D(n_channels=4, n_classes=5)  # Adjust the number of channels and classes based on your dataset specifics
 model = model.to(device)
 criterion = torch.nn.CrossEntropyLoss()  # You might adjust this depending on your specific task
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
 
 train_model(model, data_loader, val_loader, criterion, optimizer, num_epochs=10, save_directory=sav_dir,num_classes=5)
 
