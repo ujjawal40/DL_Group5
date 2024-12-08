@@ -16,8 +16,8 @@ from scipy.spatial.distance import directed_hausdorff
 train_image_dir = '/home/ubuntu/DL_Group5/Data/train_images'
 train_mask_dir = '/home/ubuntu/DL_Group5/Data/train_masks'
 val_image_dir = '/home/ubuntu/DL_Group5/Data/test_images'
-val_mask_dir = '/home/ubuntu//DL_Group5/Data/test_masks'
-save_dir = '/home/ubuntu//DL_Group5/models/fcnn_models'
+val_mask_dir = '/home/ubuntu/DL_Group5/Data/test_masks'
+save_dir = '/home/ubuntu/DL_Group5/models/fcnn_models'
 
 # Ensure the save directory exists
 os.makedirs(save_dir, exist_ok=True)
@@ -26,6 +26,7 @@ os.makedirs(save_dir, exist_ok=True)
 ### Dataset and Preprocessing ###
 class MedicalDataset(Dataset):
     def __init__(self, image_dir, mask_dir, target_size=(128, 128, 128)):
+        print("Initializing dataset...")
         self.image_dir = image_dir
         self.mask_dir = mask_dir
         self.modalities = ['t1c', 't1n', 't2f', 't2w']
@@ -40,6 +41,7 @@ class MedicalDataset(Dataset):
         images = []
         for modality in self.modalities:
             image_path = os.path.join(self.image_dir, f"{patient_id}_{modality}.nii")
+            print(f"Loading and processing image: {image_path}")
             image = sitk.ReadImage(image_path, sitk.sitkFloat32)
             image_resized = self.resize_image(image)
             image_np = sitk.GetArrayFromImage(image_resized)
@@ -49,6 +51,7 @@ class MedicalDataset(Dataset):
         images_stack = np.stack(images, axis=0)
 
         mask_path = os.path.join(self.mask_dir, f"{patient_id}_seg.nii")
+        print(f"Loading and processing mask: {mask_path}")
         mask = sitk.ReadImage(mask_path, sitk.sitkFloat32)
         mask_resized = self.resize_image(mask)
         mask_np = sitk.GetArrayFromImage(mask_resized)
@@ -100,14 +103,6 @@ def dice_coefficient(pred, target, num_classes):
     return dice / (num_classes - 1)
 
 def compute_hausdorff(pred, target):
-    """
-    Compute the Hausdorff Distance between predicted and target masks.
-    Args:
-        pred: Predicted segmentation (tensor or numpy array).
-        target: Ground truth segmentation (tensor or numpy array).
-    Returns:
-        hausdorff_distance: Hausdorff Distance value.
-    """
     pred_np = (pred > 0).cpu().numpy()  # Binary prediction mask
     target_np = (target > 0).cpu().numpy()  # Binary ground truth mask
 
@@ -115,7 +110,6 @@ def compute_hausdorff(pred, target):
     target_coords = np.argwhere(target_np)
 
     if len(pred_coords) == 0 or len(target_coords) == 0:
-        # If either is empty, return a large distance (e.g., 1000)
         return float('inf')
 
     h1 = directed_hausdorff(pred_coords, target_coords)[0]
@@ -132,7 +126,9 @@ def train_fcnn(model, train_loader, val_loader, criterion, optimizer, num_epochs
     train_dice_scores, val_dice_scores = [], []
     train_hausdorff_scores, val_hausdorff_scores = [], []
 
+    print("Starting training...")
     for epoch in range(num_epochs):
+        print(f"Epoch {epoch + 1}/{num_epochs}")
         model.train()
         total_train_loss, total_train_dice, total_train_hausdorff = 0, 0, 0
 
@@ -180,14 +176,12 @@ def train_fcnn(model, train_loader, val_loader, criterion, optimizer, num_epochs
         val_dice_scores.append(total_val_dice / len(val_loader))
         val_hausdorff_scores.append(total_val_hausdorff / len(val_loader))
 
-        print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_losses[-1]:.4f}, Val Loss: {val_losses[-1]:.4f}, "
+        print(f"Train Loss: {train_losses[-1]:.4f}, Val Loss: {val_losses[-1]:.4f}, "
               f"Train Dice: {train_dice_scores[-1]:.4f}, Val Dice: {val_dice_scores[-1]:.4f}, "
               f"Train Hausdorff: {train_hausdorff_scores[-1]:.4f}, Val Hausdorff: {val_hausdorff_scores[-1]:.4f}")
 
-        # Save model checkpoint
         torch.save(model.state_dict(), os.path.join(save_directory, f'model_epoch_{epoch + 1}.pth'))
 
-    # Save metrics
     history_df = pd.DataFrame({
         'Train Loss': train_losses,
         'Validation Loss': val_losses,
@@ -197,27 +191,25 @@ def train_fcnn(model, train_loader, val_loader, criterion, optimizer, num_epochs
         'Validation Hausdorff': val_hausdorff_scores
     })
     history_df.to_csv(os.path.join(save_directory, 'training_history.csv'), index=False)
+    print("Training complete. History saved.")
     return history_df
 
 
-
 ### Main Execution ###
-# Define dataset and dataloaders
+print("Starting preprocessing...")
 train_dataset = MedicalDataset(train_image_dir, train_mask_dir)
 val_dataset = MedicalDataset(val_image_dir, val_mask_dir)
 
 train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4)
 val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=4)
+print("Preprocessing complete.")
 
-# Initialize model, criterion, and optimizer
 model = FCNN3D(in_channels=4, out_channels=5)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-# Train the model
 history = train_fcnn(model, train_loader, val_loader, criterion, optimizer, num_epochs=20, save_directory=save_dir)
 
-# Plot loss and dice coefficient
 history_df = pd.read_csv(os.path.join(save_dir, 'training_history.csv'))
 plt.figure(figsize=(12, 6))
 plt.plot(history_df['Train Loss'], label='Train Loss')
@@ -236,6 +228,7 @@ plt.xlabel('Epochs')
 plt.ylabel('Dice Coefficient')
 plt.legend()
 plt.show()
+
 
 
 
