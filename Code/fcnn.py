@@ -39,7 +39,7 @@ model_name = 'Unet'
 train_bs = 128
 valid_bs = train_bs * 2
 img_size = (224, 224)
-n_epochs = 10
+n_epochs = 20
 LR = 0.0001
 scheduler = 'CosineAnnealingLR'
 n_accumulate = max(1, 32 // train_bs)
@@ -180,33 +180,61 @@ def show_img(img, mask=None):
     plt.axis('off')
 
 
-def plot_batch(imgs, msks=None, size=5):
-    """
-    Plot a batch of images and masks side by side for visualization.
-    """
-    # Ensure size does not exceed batch size
-    size = min(size, len(imgs))
+# def plot_batch(imgs, msks=None, size=5):
+#     """
+#     Plot a batch of images and masks side by side for visualization.
+#     """
+#     # Ensure size does not exceed batch size
+#     size = min(size, len(imgs))
+#
+#     # Set up the figure
+#     plt.figure(figsize=(size * 5, 10))
+#     for idx in range(size):
+#         # Plot the image
+#         plt.subplot(2, size, idx + 1)
+#         img = imgs[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
+#         img = (img - img.min()) / (img.max() - img.min())  # Normalize to [0, 1] range
+#         img = img.squeeze()  # Remove the channel dimension for grayscale
+#         plt.imshow(img, cmap="gray")  # Use gray colormap for better visualization
+#         plt.axis("off")
+#         plt.title("Image")
+#
+#         # Plot the mask if available
+#         if msks is not None:
+#             plt.subplot(2, size, idx + 1 + size)
+#             mask = msks[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
+#             mask_combined = mask.sum(axis=-1)  # Combine classes for better visualization
+#             plt.imshow(mask_combined, cmap="viridis", alpha=0.8)
+#             plt.axis("off")
+#             plt.title("Mask")
+#
+#     plt.tight_layout()
+#     plt.show()
 
-    # Set up the figure
-    plt.figure(figsize=(size * 5, 10))
-    for idx in range(size):
+def visualize_images_and_masks(data_loader, num_samples=5):
+    """
+    Visualize the first few images and their corresponding masks from the dataloader.
+    """
+    import matplotlib.pyplot as plt
+
+    images, masks = next(iter(data_loader))  # Fetch a single batch
+    plt.figure(figsize=(15, 5 * num_samples))
+
+    for i in range(min(num_samples, len(images))):
         # Plot the image
-        plt.subplot(2, size, idx + 1)
-        img = imgs[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
-        img = (img - img.min()) / (img.max() - img.min())  # Normalize to [0, 1] range
-        img = img.squeeze()  # Remove the channel dimension for grayscale
-        plt.imshow(img, cmap="gray")  # Use gray colormap for better visualization
+        plt.subplot(num_samples, 2, i * 2 + 1)
+        image = images[i].permute(1, 2, 0).cpu().numpy()  # Convert to HWC format
+        plt.imshow(image[:, :, 0], cmap='gray')  # Plot only the first channel (assuming grayscale)
         plt.axis("off")
-        plt.title("Image")
+        plt.title(f"Image {i + 1}")
 
-        # Plot the mask if available
-        if msks is not None:
-            plt.subplot(2, size, idx + 1 + size)
-            mask = msks[idx].permute((1, 2, 0)).cpu().numpy()  # Convert to HWC format
-            mask_combined = mask.sum(axis=-1)  # Combine classes for better visualization
-            plt.imshow(mask_combined, cmap="viridis", alpha=0.8)
-            plt.axis("off")
-            plt.title("Mask")
+        # Plot the corresponding mask
+        plt.subplot(num_samples, 2, i * 2 + 2)
+        mask = masks[i].permute(1, 2, 0).cpu().numpy()  # Convert to HWC format
+        mask_combined = mask[:, :, 0] + mask[:, :, 1] * 0.5 + mask[:, :, 2] * 0.3  # Combine classes
+        plt.imshow(mask_combined, cmap="viridis", alpha=0.7)
+        plt.axis("off")
+        plt.title(f"Mask {i + 1}")
 
     plt.tight_layout()
     plt.show()
@@ -529,12 +557,12 @@ def run_training(model, optimizer, scheduler, device, num_epochs, train_loader, 
             # run.summary["Best Jaccard"] = best_jaccard
             # run.summary["Best Epoch"]   = best_epoch
             best_model_wts = copy.deepcopy(model.state_dict())
-            torch.save(model.state_dict(), "best_model_Kanishk.pt")
+            torch.save(model.state_dict(), "best_model_Ujjawal.pt")
             # Save a model file from the current directory
             print(f"Model Saved{sr_}")
 
         last_model_wts = copy.deepcopy(model.state_dict())
-        torch.save(model.state_dict(), "final_model_Kanishk.pt")
+        torch.save(model.state_dict(), "final_model_Ujjawal.pt")
         print()
 
     print("Best Score: {:.4f}".format(best_jaccard))
@@ -592,7 +620,7 @@ def valid_one_epoch(model, dataloader, device, epoch=1):
 def save_model(model):
     # Open the file
 
-    print(model, file=open('summary_{}.txt'.format('kanishk'), "w"))
+    print(model, file=open('summary_{}.txt'.format('ujjawal'), "w"))
 
 
 if __name__ == '__main__':
@@ -606,9 +634,9 @@ if __name__ == '__main__':
     train_loader, val_loader = read_data()
 
     # Train the model
+
+    visualize_images_and_masks(train_loader, num_samples=5)
     model, history = run_training(model, optimizer, scheduler, device, n_epochs, train_loader, val_loader)
 
-    # Visualize a batch of training data
-    for imgs, msks in train_loader:
-        plot_batch(imgs, msks, size=5)
-        break
+
+
