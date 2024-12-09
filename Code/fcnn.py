@@ -239,6 +239,35 @@ def visualize_images_and_masks(data_loader, num_samples=5):
     plt.tight_layout()
     plt.show()
 
+def plot_training_progress(history, num_epochs):
+
+    epochs = range(1, num_epochs + 1)
+
+    plt.figure(figsize=(15, 8))
+
+    # Plot training and validation loss
+    plt.subplot(2, 1, 1)
+    plt.plot(epochs, history["train_loss"], label="Training Loss", marker="o")
+    plt.plot(epochs, history["val_loss"], label="Validation Loss", marker="o")
+    plt.title("Training and Validation Loss", fontsize=14)
+    plt.xlabel("Epochs", fontsize=12)
+    plt.ylabel("Loss", fontsize=12)
+    plt.legend(loc="upper right")
+    plt.grid(True)
+
+    # Plot Dice and Jaccard scores
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs, history["dice_score"], label="Dice Score", marker="o")
+    plt.plot(epochs, history["jaccard_score"], label="Jaccard Score", marker="o")
+    plt.title("Dice and Jaccard Scores", fontsize=14)
+    plt.xlabel("Epochs", fontsize=12)
+    plt.ylabel("Score", fontsize=12)
+    plt.legend(loc="lower right")
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
 
 # Model Architecture
 class FCNVGG(nn.Module):
@@ -542,6 +571,11 @@ def run_training(model, optimizer, scheduler, device, num_epochs, train_loader, 
                                                device=device,
                                                epoch=epoch)
         val_dice, val_jaccard = val_scores
+
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['dice_score'].append(val_dice)
+        history['jaccard_score'].append(val_jaccard)
 
         # Log the metrics
 
