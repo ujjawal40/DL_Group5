@@ -369,7 +369,7 @@ if __name__ == "__main__":
     model = model.to(device)
     # Update the path to the ResidualUNet3D checkpoint you saved during training
     model_dir = os.path.join(parent_dir, 'models', 'models_by_train')
-    model_path = f'{model_dir}/best_model_unet3d.pth'
+    model_path = f'{model_dir}/best_model_residualUnet3d.pth'
     state_dict = torch.load(model_path, map_location=device)
     model.load_state_dict(state_dict)
 
@@ -393,4 +393,3 @@ if __name__ == "__main__":
             if(c==10):
                 break
             c=c+1
-
