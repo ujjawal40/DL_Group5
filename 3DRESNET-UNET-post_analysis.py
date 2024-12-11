@@ -86,7 +86,7 @@ class BraTSDataset_val(Dataset):
             torch.tensor(original_seg_array, dtype=torch.long),
         )
 
-# Collate Function for DataLoader
+
 
 def custom_collate1(batch):
     images_original, masks_original = zip(*batch)
@@ -104,7 +104,7 @@ class ResidualBlock(nn.Module):
         self.conv2 = nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm3d(out_channels)
 
-        # Skip connection: if input channels and output channels are different, use a 1x1 convolution to match dimensions
+        
         self.skip_connection = nn.Conv3d(in_channels, out_channels,
                                          kernel_size=1) if in_channels != out_channels else None
 
@@ -361,13 +361,13 @@ if __name__ == "__main__":
 
     model = ResidualUNet3D(n_channels=4, n_classes=5)
     model = model.to(device)
-    # Update the path to the ResidualUNet3D checkpoint you saved during training
+   
     state_dict = torch.load('/home/ubuntu/dl_code/models/best_model.pth', map_location=device)
     model.load_state_dict(state_dict)
 
-    # Define the loss function
+    
     criterion = nn.CrossEntropyLoss()  # Define the loss function
-    num_classes = 5  # Total number of classes (including background)
+    num_classes = 5 
 
     # Evaluate the model
     val_loss, val_dice_scores = evaluate_model(model, val_loader, criterion, num_classes, device)
